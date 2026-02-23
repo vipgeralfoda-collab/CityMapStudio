@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="CityMapStudio.Application/CityMapStudio.Application.csproj" />
+  <Project Path="CityMapStudio.Domain/CityMapStudio.Domain.csproj" />
+  <Project Path="CityMapStudio.Infrastructure/CityMapStudio.Infrastructure.csproj" />
+  <Project Path="CityMapStudio.Rendering3D/CityMapStudio.Rendering3D.csproj" />
+  <Project Path="CityMapStudio.UI.Wpf/CityMapStudio.UI.Wpf.csproj" />
+</Solution>

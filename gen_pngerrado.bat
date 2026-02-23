@@ -1,0 +1,3 @@
+@echo off
+powershell -Command "[System.Reflection.Assembly]::LoadWithPartialName('System.Drawing') | Out-Null; $b = New-Object System.Drawing.Bitmap(512, 512); for ($y=0; $y -lt 512; $y++) { for ($x=0; $x -lt 512; $x++) { $v = [Math]::Sin($x/512*6.28)*0.5 + [Math]::Cos($y/512*6.28)*0.5; $g = [int][Math]::Max(0,[Math]::Min(255,($v+1)*127.5)); $b.SetPixel($x,$y,[System.Drawing.Color]::FromArgb($g,$g,$g)); } }; $b.Save('test_heightmap.png'); Write-Host 'PNG criado: test_heightmap.png'; "
+pause
