@@ -9,25 +9,9 @@ namespace CityMapStudio.Rendering3D.Services
         public MeshGeometry3D WaterMesh { get; set; }
     }
 
-    /// <summary>
-    /// Gera malhas 3D de terreno com suporte a LOD (Level of Detail) por step (subamostragem)
-    /// </summary>
     public class TerrainMeshGenerator
     {
-        /// <summary>
-        /// Gera mesh do terreno com suporte a LOD via step
-        /// step=1: cada ponto (LOD0, máximo detalhe)
-        /// step=2: ponto a cada 2 (LOD1)
-        /// step=4: ponto a cada 4 (LOD2)
-        /// step=8: ponto a cada 8 (LOD3)
-        /// step=16: ponto a cada 16 (LOD4, mínimo detalhe)
-        /// </summary>
-        public TerrainMeshData GenerateTerrainMeshWithSeaLevel(
-            Heightmap16Bit heightmap,
-            float verticalScale,
-            float seaLevel,
-            float cellSize = 1.0f,
-            int step = 1)
+        public TerrainMeshData GenerateTerrainMeshWithSeaLevel(Heightmap16Bit heightmap, float verticalScale, float seaLevel, float cellSize = 1.0f)
         {
             var terrainMesh = new MeshGeometry3D();
             var waterMesh = new MeshGeometry3D();
@@ -35,19 +19,16 @@ namespace CityMapStudio.Rendering3D.Services
             int width = heightmap.Width;
             int height = heightmap.Height;
 
-            // Garantir que step é válido
-            step = Math.Max(1, step);
-
             // Dicionários para mapeamento de vértices (terra e água separadas)
             var terrainVertexMap = new Dictionary<int, int>();
             var waterVertexMap = new Dictionary<int, int>();
             int terrainVertexCount = 0;
             int waterVertexCount = 0;
 
-            // ===== GERAR VÉRTICES DO TOPO (com step) =====
-            for (int y = 0; y < height; y += step)
+            // ===== GERAR VÉRTICES DO TOPO =====
+            for (int y = 0; y < height; y++)
             {
-                for (int x = 0; x < width; x += step)
+                for (int x = 0; x < width; x++)
                 {
                     float heightValue = (heightmap.GetHeight(x, y) / 65535f) * verticalScale;
                     float posX = x * cellSize;
@@ -56,121 +37,122 @@ namespace CityMapStudio.Rendering3D.Services
 
                     if (heightValue >= seaLevel)
                     {
+                        // Vértice de terra
                         terrainVertexMap[index] = terrainVertexCount++;
                         terrainMesh.Positions.Add(new Point3D(posX, heightValue, posZ));
                     }
                     else
                     {
+                        // Vértice de água - criar na altura real do terreno
                         waterVertexMap[index] = waterVertexCount++;
                         waterMesh.Positions.Add(new Point3D(posX, heightValue, posZ));
                     }
                 }
             }
 
-            // ===== GERAR TRIÂNGULOS DO TOPO (com step) =====
-            for (int y = 0; y < height - step; y += step)
+            // ===== GERAR TRIÂNGULOS DO TOPO =====
+            for (int y = 0; y < height - 1; y++)
             {
-                for (int x = 0; x < width - step; x += step)
+                for (int x = 0; x < width - 1; x++)
                 {
                     int v0_old = y * width + x;
-                    int v1_old = y * width + x + step;
-                    int v2_old = (y + step) * width + x;
-                    int v3_old = (y + step) * width + x + step;
+                    int v1_old = y * width + x + 1;
+                    int v2_old = (y + 1) * width + x;
+                    int v3_old = (y + 1) * width + x + 1;
 
-                    // Terra - Triângulo 1 (v0-v1-v2)
-                    if (terrainVertexMap.ContainsKey(v0_old) && 
-                        terrainVertexMap.ContainsKey(v1_old) && 
-                        terrainVertexMap.ContainsKey(v2_old))
+                    // Triângulo 1 terra
+                    int t_v0 = terrainVertexMap.ContainsKey(v0_old) ? terrainVertexMap[v0_old] : -1;
+                    int t_v2 = terrainVertexMap.ContainsKey(v2_old) ? terrainVertexMap[v2_old] : -1;
+                    int t_v1 = terrainVertexMap.ContainsKey(v1_old) ? terrainVertexMap[v1_old] : -1;
+
+                    if (t_v0 != -1 && t_v2 != -1 && t_v1 != -1)
                     {
-                        terrainMesh.TriangleIndices.Add(terrainVertexMap[v0_old]);
-                        terrainMesh.TriangleIndices.Add(terrainVertexMap[v1_old]);
-                        terrainMesh.TriangleIndices.Add(terrainVertexMap[v2_old]);
+                        terrainMesh.TriangleIndices.Add(t_v0);
+                        terrainMesh.TriangleIndices.Add(t_v2);
+                        terrainMesh.TriangleIndices.Add(t_v1);
                     }
 
-                    // Terra - Triângulo 2 (v1-v3-v2)
-                    if (terrainVertexMap.ContainsKey(v1_old) && 
-                        terrainVertexMap.ContainsKey(v3_old) && 
-                        terrainVertexMap.ContainsKey(v2_old))
+                    // Triângulo 2 terra
+                    int t_v3 = terrainVertexMap.ContainsKey(v3_old) ? terrainVertexMap[v3_old] : -1;
+                    if (t_v1 != -1 && t_v2 != -1 && t_v3 != -1)
                     {
-                        terrainMesh.TriangleIndices.Add(terrainVertexMap[v1_old]);
-                        terrainMesh.TriangleIndices.Add(terrainVertexMap[v3_old]);
-                        terrainMesh.TriangleIndices.Add(terrainVertexMap[v2_old]);
+                        terrainMesh.TriangleIndices.Add(t_v1);
+                        terrainMesh.TriangleIndices.Add(t_v2);
+                        terrainMesh.TriangleIndices.Add(t_v3);
                     }
 
-                    // Água - Triângulo 1 (v0-v1-v2)
-                    if (waterVertexMap.ContainsKey(v0_old) && 
-                        waterVertexMap.ContainsKey(v1_old) && 
-                        waterVertexMap.ContainsKey(v2_old))
+                    // Triângulos de água
+                    int w_v0 = waterVertexMap.ContainsKey(v0_old) ? waterVertexMap[v0_old] : -1;
+                    int w_v2 = waterVertexMap.ContainsKey(v2_old) ? waterVertexMap[v2_old] : -1;
+                    int w_v1 = waterVertexMap.ContainsKey(v1_old) ? waterVertexMap[v1_old] : -1;
+
+                    if (w_v0 != -1 && w_v2 != -1 && w_v1 != -1)
                     {
-                        waterMesh.TriangleIndices.Add(waterVertexMap[v0_old]);
-                        waterMesh.TriangleIndices.Add(waterVertexMap[v1_old]);
-                        waterMesh.TriangleIndices.Add(waterVertexMap[v2_old]);
+                        waterMesh.TriangleIndices.Add(w_v0);
+                        waterMesh.TriangleIndices.Add(w_v2);
+                        waterMesh.TriangleIndices.Add(w_v1);
                     }
 
-                    // Água - Triângulo 2 (v1-v3-v2)
-                    if (waterVertexMap.ContainsKey(v1_old) && 
-                        waterVertexMap.ContainsKey(v3_old) && 
-                        waterVertexMap.ContainsKey(v2_old))
+                    int w_v3 = waterVertexMap.ContainsKey(v3_old) ? waterVertexMap[v3_old] : -1;
+                    if (w_v1 != -1 && w_v2 != -1 && w_v3 != -1)
                     {
-                        waterMesh.TriangleIndices.Add(waterVertexMap[v1_old]);
-                        waterMesh.TriangleIndices.Add(waterVertexMap[v3_old]);
-                        waterMesh.TriangleIndices.Add(waterVertexMap[v2_old]);
+                        waterMesh.TriangleIndices.Add(w_v1);
+                        waterMesh.TriangleIndices.Add(w_v2);
+                        waterMesh.TriangleIndices.Add(w_v3);
                     }
                 }
             }
 
             int terrainTopVertexCount = terrainMesh.Positions.Count;
 
-            // ===== GERAR VÉRTICES DAS LATERAIS (com step mais grosso) =====
-            int sideStep = Math.Max(step * 2, 2); // Laterais sempre com step >= 2
-
+            // ===== GERAR VÉRTICES DAS LATERAIS (apenas TERRA) =====
             // Parede frente (y = 0)
-            for (int x = 0; x < width; x += sideStep)
+            for (int x = 0; x < width; x++)
             {
                 float heightValue = (heightmap.GetHeight(x, 0) / 65535f) * verticalScale;
                 float posX = x * cellSize;
-                terrainMesh.Positions.Add(new Point3D(posX, 0, 0));
-                terrainMesh.Positions.Add(new Point3D(posX, heightValue, 0));
+                terrainMesh.Positions.Add(new Point3D(posX, 0, 0));       // base
+                terrainMesh.Positions.Add(new Point3D(posX, heightValue, 0)); // topo
             }
 
             // Parede trás (y = height-1)
-            for (int x = 0; x < width; x += sideStep)
+            for (int x = 0; x < width; x++)
             {
                 float heightValue = (heightmap.GetHeight(x, height - 1) / 65535f) * verticalScale;
                 float posX = x * cellSize;
                 float posZ = (height - 1) * cellSize;
-                terrainMesh.Positions.Add(new Point3D(posX, 0, posZ));
-                terrainMesh.Positions.Add(new Point3D(posX, heightValue, posZ));
+                terrainMesh.Positions.Add(new Point3D(posX, 0, posZ));           // base
+                terrainMesh.Positions.Add(new Point3D(posX, heightValue, posZ)); // topo
             }
 
             // Parede esquerda (x = 0)
-            for (int y = 0; y < height; y += sideStep)
+            for (int y = 0; y < height; y++)
             {
                 float heightValue = (heightmap.GetHeight(0, y) / 65535f) * verticalScale;
                 float posZ = y * cellSize;
-                terrainMesh.Positions.Add(new Point3D(0, 0, posZ));
-                terrainMesh.Positions.Add(new Point3D(0, heightValue, posZ));
+                terrainMesh.Positions.Add(new Point3D(0, 0, posZ));       // base
+                terrainMesh.Positions.Add(new Point3D(0, heightValue, posZ)); // topo
             }
 
             // Parede direita (x = width-1)
-            for (int y = 0; y < height; y += sideStep)
+            for (int y = 0; y < height; y++)
             {
                 float heightValue = (heightmap.GetHeight(width - 1, y) / 65535f) * verticalScale;
                 float posX = (width - 1) * cellSize;
                 float posZ = y * cellSize;
-                terrainMesh.Positions.Add(new Point3D(posX, 0, posZ));
-                terrainMesh.Positions.Add(new Point3D(posX, heightValue, posZ));
+                terrainMesh.Positions.Add(new Point3D(posX, 0, posZ));           // base
+                terrainMesh.Positions.Add(new Point3D(posX, heightValue, posZ)); // topo
             }
 
             int sideStartIndex = terrainTopVertexCount;
 
-            // ===== GERAR TRIÂNGULOS DAS LATERAIS (simplificados) =====
+            // ===== GERAR TRIÂNGULOS DAS LATERAIS =====
+            // Triângulos parede frente
             int frontBaseStart = sideStartIndex;
-            int frontCount = (width + sideStep - 1) / sideStep;
-            for (int i = 0; i < frontCount - 1; i++)
+            for (int x = 0; x < width - 1; x++)
             {
-                int base0 = frontBaseStart + i * 2;
-                int base1 = frontBaseStart + (i + 1) * 2;
+                int base0 = frontBaseStart + x * 2;
+                int base1 = frontBaseStart + (x + 1) * 2;
                 int top0 = base0 + 1;
                 int top1 = base1 + 1;
 
@@ -183,12 +165,12 @@ namespace CityMapStudio.Rendering3D.Services
                 terrainMesh.TriangleIndices.Add(top1);
             }
 
-            int backBaseStart = frontBaseStart + frontCount * 2;
-            int backCount = (width + sideStep - 1) / sideStep;
-            for (int i = 0; i < backCount - 1; i++)
+            // Triângulos parede trás
+            int backBaseStart = frontBaseStart + width * 2;
+            for (int x = 0; x < width - 1; x++)
             {
-                int base0 = backBaseStart + i * 2;
-                int base1 = backBaseStart + (i + 1) * 2;
+                int base0 = backBaseStart + x * 2;
+                int base1 = backBaseStart + (x + 1) * 2;
                 int top0 = base0 + 1;
                 int top1 = base1 + 1;
 
@@ -201,12 +183,12 @@ namespace CityMapStudio.Rendering3D.Services
                 terrainMesh.TriangleIndices.Add(base1);
             }
 
-            int leftBaseStart = backBaseStart + backCount * 2;
-            int leftCount = (height + sideStep - 1) / sideStep;
-            for (int i = 0; i < leftCount - 1; i++)
+            // Triângulos parede esquerda
+            int leftBaseStart = backBaseStart + width * 2;
+            for (int y = 0; y < height - 1; y++)
             {
-                int base0 = leftBaseStart + i * 2;
-                int base1 = leftBaseStart + (i + 1) * 2;
+                int base0 = leftBaseStart + y * 2;
+                int base1 = leftBaseStart + (y + 1) * 2;
                 int top0 = base0 + 1;
                 int top1 = base1 + 1;
 
@@ -219,12 +201,12 @@ namespace CityMapStudio.Rendering3D.Services
                 terrainMesh.TriangleIndices.Add(base1);
             }
 
-            int rightBaseStart = leftBaseStart + leftCount * 2;
-            int rightCount = (height + sideStep - 1) / sideStep;
-            for (int i = 0; i < rightCount - 1; i++)
+            // Triângulos parede direita
+            int rightBaseStart = leftBaseStart + height * 2;
+            for (int y = 0; y < height - 1; y++)
             {
-                int base0 = rightBaseStart + i * 2;
-                int base1 = rightBaseStart + (i + 1) * 2;
+                int base0 = rightBaseStart + y * 2;
+                int base1 = rightBaseStart + (y + 1) * 2;
                 int top0 = base0 + 1;
                 int top1 = base1 + 1;
 
@@ -235,34 +217,6 @@ namespace CityMapStudio.Rendering3D.Services
                 terrainMesh.TriangleIndices.Add(base0);
                 terrainMesh.TriangleIndices.Add(base1);
                 terrainMesh.TriangleIndices.Add(top1);
-            }
-
-            // ===== ADICIONAR MALHA DE ÁGUA PLANA (SE NECESSÁRIO) =====
-            // Se não houver água subterrânea, criar malha de água plana na superfície
-            if (waterMesh.Positions.Count == 0)
-            {
-                // Criar malha de água plana na altura do seaLevel cobrindo toda a área
-                // Adicionar 4 vértices nos cantos do mapa
-                waterMesh.Positions.Add(new Point3D(0, seaLevel, 0));
-                waterMesh.Positions.Add(new Point3D((width - 1) * cellSize, seaLevel, 0));
-                waterMesh.Positions.Add(new Point3D((width - 1) * cellSize, seaLevel, (height - 1) * cellSize));
-                waterMesh.Positions.Add(new Point3D(0, seaLevel, (height - 1) * cellSize));
-
-                // Criar 2 triângulos para cobrir toda a área
-                waterMesh.TriangleIndices.Add(0);
-                waterMesh.TriangleIndices.Add(1);
-                waterMesh.TriangleIndices.Add(2);
-
-                waterMesh.TriangleIndices.Add(0);
-                waterMesh.TriangleIndices.Add(2);
-                waterMesh.TriangleIndices.Add(3);
-
-                // Adicionar normals (apontando para cima para iluminação correta)
-                var upNormal = new Vector3D(0, 1, 0);
-                waterMesh.Normals.Add(upNormal);
-                waterMesh.Normals.Add(upNormal);
-                waterMesh.Normals.Add(upNormal);
-                waterMesh.Normals.Add(upNormal);
             }
 
             terrainMesh.Freeze();
@@ -276,11 +230,12 @@ namespace CityMapStudio.Rendering3D.Services
         }
 
         /// <summary>
-        /// Versão simples sem LOD (usa step=1)
+        /// Versão simples: gera apenas o mesh de terra (sem água)
+        /// Mantém compatibilidade com código antigo
         /// </summary>
         public MeshGeometry3D GenerateTerrainMesh(Heightmap16Bit heightmap, float verticalScale, float cellSize = 1.0f, float seaLevel = 0f)
         {
-            var data = GenerateTerrainMeshWithSeaLevel(heightmap, verticalScale, seaLevel, cellSize, step: 1);
+            var data = GenerateTerrainMeshWithSeaLevel(heightmap, verticalScale, seaLevel, cellSize);
             return data.TerrainMesh;
         }
     }

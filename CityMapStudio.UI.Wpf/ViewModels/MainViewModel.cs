@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows.Input;
 using System.Windows.Media.Media3D;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -19,30 +19,10 @@ namespace CityMapStudio.UI.Wpf.ViewModels
         private readonly IHeightmapSmoothingService _smoothingService;
         private readonly IHeightmapNormalizationService _normalizationService;
         private readonly IHeightmapDownscaleService _downscaleService;
-        private readonly CameraControllerService _cameraController = new CameraControllerService();
+        private RelayCommand _resetCameraCommand;
+        private RelayCommand _importHeightmapCommand;
+        private RelayCommand _exportPackageCommand;
 
-        // Cached resources
-        private Dictionary<PreviewResolution, Heightmap16Bit> _previewCache = 
-            new Dictionary<PreviewResolution, Heightmap16Bit>();
-        private Dictionary<(int step, float seaLevel, float verticalScale), TerrainMeshData> _meshCache =
-            new Dictionary<(int, float, float), TerrainMeshData>();
-
-        // Async management
-        private CancellationTokenSource _previewCancellationToken;
-        private System.Timers.Timer _previewDebounceTimer;
-        private System.Timers.Timer _lodDebounceTimer;
-
-        // LOD management
-        public TerrainLodController _lodController { get; set; }
-        private int _currentLodStep = 1;
-
-        // Camera Controller
-        public CameraControllerService CameraController => _cameraController;
-
-        // Event para notificar MainWindow de mudan�as que requerem reset de c�mera
-        public event Action OnHeightmapChanged;
-
-        // Bindable properties
         [ObservableProperty]
         private MeshGeometry3D terrainMesh;
 
@@ -66,9 +46,6 @@ namespace CityMapStudio.UI.Wpf.ViewModels
 
         [ObservableProperty]
         private bool isHeightmapLoaded = false;
-
-        [ObservableProperty]
-        private bool isLoading = false;
 
         [ObservableProperty]
         private string statusText = "Ready";
@@ -100,16 +77,34 @@ namespace CityMapStudio.UI.Wpf.ViewModels
         [ObservableProperty]
         private string previewInfo = "Preview: Waiting for heightmap";
 
+        private CancellationTokenSource _previewCancellationToken;
+        private System.Timers.Timer _previewDebounceTimer;
+
         [ObservableProperty]
-        private string lodIndicator = "LOD: 0 (step=1)";
+        private float renderResolution = 512f;
+
+        [ObservableProperty]
+        private bool isLoading = false;
 
         public ICommand GenerateTestTerrainCommand { get; }
         
-        public ICommand ImportHeightmapCommand { get; set; }
+        public ICommand ImportHeightmapCommand
+        {
+            get => _importHeightmapCommand;
+            set => _importHeightmapCommand = value as RelayCommand;
+        }
+
+        public ICommand ExportPackageCommand
+        {
+            get => _exportPackageCommand;
+            set => _exportPackageCommand = value as RelayCommand;
+        }
         
-        public ICommand ExportPackageCommand { get; set; }
-        
-        public ICommand ResetCameraCommand { get; set; }
+        public ICommand ResetCameraCommand
+        {
+            get => _resetCameraCommand;
+            set => _resetCameraCommand = value as RelayCommand;
+        }
 
         public MainViewModel()
         {
@@ -130,25 +125,66 @@ namespace CityMapStudio.UI.Wpf.ViewModels
             _exportPackage = new ExportPackageUseCase(exportService);
 
             GenerateTestTerrainCommand = new RelayCommand(GenerateTestTerrain);
-            ImportHeightmapCommand = new RelayCommand(() => { });
-            ExportPackageCommand = new RelayCommand(() => { });
-            ResetCameraCommand = new RelayCommand(ResetCamera);
+            _importHeightmapCommand = new RelayCommand(() => { });
+            _exportPackageCommand = new RelayCommand(() => { });
+            _resetCameraCommand = new RelayCommand(ResetCamera);
 
-            // Debounce timers
-            _previewDebounceTimer = new System.Timers.Timer(200);
+            // Inicializar debounce timer para preview
+            _previewDebounceTimer = new System.Timers.Timer(200); // 200ms debounce
             _previewDebounceTimer.AutoReset = false;
             _previewDebounceTimer.Elapsed += (s, e) => RegeneratePreviewAsync().Wait();
-
-            _lodDebounceTimer = new System.Timers.Timer(150);
-            _lodDebounceTimer.AutoReset = false;
-            _lodDebounceTimer.Elapsed += (s, e) => ApplyLodChange();
         }
 
+        /// <summary>
+        /// Inicializa os comandos que dependem da View
+        /// Deve ser chamado ANTES de setar DataContext
+        /// </summary>
         public void InitializeViewCommands(Action onResetCamera, Action onImportHeightmap, Action onExportPackage)
         {
-            ResetCameraCommand = new RelayCommand(onResetCamera);
-            ImportHeightmapCommand = new RelayCommand(onImportHeightmap);
-            ExportPackageCommand = new RelayCommand(onExportPackage);
+            _resetCameraCommand = new RelayCommand(onResetCamera);
+            _importHeightmapCommand = new RelayCommand(onImportHeightmap);
+            _exportPackageCommand = new RelayCommand(onExportPackage);
+        }
+
+        public void ExportMapPackage(string destinationFolder)
+        {
+            if (!IsHeightmapLoaded || CurrentHeightmapOriginal == null)
+                throw new InvalidOperationException("Nenhum heightmap carregado");
+
+            StatusText = "Exportando...";
+
+            // Preparar heightmap para export
+            var heightmapForExport = CurrentHeightmapOriginal.Clone();
+
+            // Aplicar smooth se ativado
+            if (ApplySmoothOnExport && SmoothLevel > 0)
+            {
+                var smoothStrength = (SmoothStrength)(int)SmoothLevel;
+                heightmapForExport = _smoothingService.ApplySmooth(heightmapForExport, smoothStrength);
+            }
+
+            // Aplicar normalização se ativada
+            if (NormalizeForCS2)
+            {
+                heightmapForExport = _normalizationService.NormalizeForCS2(heightmapForExport, TargetMaxHeight, VerticalScale);
+            }
+
+            var project = new MapProject(
+                "My_Map",
+                heightmapForExport,
+                VerticalScale,
+                SeaLevel
+            );
+
+            // Validar projeto (vai lançar se inválido)
+            var (isValid, errorMessage) = project.Validate();
+            if (!isValid)
+                throw new InvalidOperationException(errorMessage);
+
+            // Executar exportação
+            _exportPackage.Execute(project, heightmapForExport, destinationFolder);
+            
+            StatusText = "✓ Pacote exportado com sucesso!";
         }
 
         public async void ImportHeightmapFromFile(string filePath)
@@ -158,13 +194,14 @@ namespace CityMapStudio.UI.Wpf.ViewModels
                 IsLoading = true;
                 StatusText = "Carregando heightmap...";
 
+                // Importar em thread separada
                 var heightmap = await Task.Run(() => _importHeightmap.ImportFromFile(filePath));
                 
+                // Guardar original e preview
                 CurrentHeightmapOriginal = heightmap;
                 CurrentHeightmap = heightmap.Clone();
 
-                _previewCache.Clear();
-
+                // Atualizar range de Sea Level baseado no heightmap
                 var (minHeight, maxHeight) = TerrainSettings.GetHeightRange(heightmap, VerticalScale);
                 SeaLevelMin = minHeight;
                 SeaLevelMax = maxHeight;
@@ -172,17 +209,12 @@ namespace CityMapStudio.UI.Wpf.ViewModels
 
                 IsHeightmapLoaded = true;
 
+                // Renderizar com preview pipeline em background
                 StatusText = "Processando malha 3D...";
-                
-                InitializeLodController();
-                
                 await RegeneratePreviewAsync();
 
                 HeightmapInfo = $"Full: {CurrentHeightmapOriginal.Width}x{CurrentHeightmapOriginal.Height}";
-                StatusText = $"? Heightmap importado: {System.IO.Path.GetFileName(filePath)}";
-                
-                // Notificar MainWindow para resetar c�mera
-                OnHeightmapChanged?.Invoke();
+                StatusText = $"✓ Heightmap importado: {System.IO.Path.GetFileName(filePath)}";
             }
             catch (Exception ex)
             {
@@ -201,10 +233,10 @@ namespace CityMapStudio.UI.Wpf.ViewModels
             {
                 StatusText = "Generating...";
 
+                // Gerar heightmap procedural FULL 4096x4096
                 CurrentHeightmapOriginal = _heightmapGenerator.Generate(4096, 4096, 1.0f, Environment.TickCount);
 
-                _previewCache.Clear();
-
+                // Atualizar range de Sea Level
                 var (minHeight, maxHeight) = TerrainSettings.GetHeightRange(CurrentHeightmapOriginal, VerticalScale);
                 SeaLevelMin = minHeight;
                 SeaLevelMax = maxHeight;
@@ -212,17 +244,12 @@ namespace CityMapStudio.UI.Wpf.ViewModels
 
                 IsHeightmapLoaded = true;
 
+                // Renderizar com preview pipeline
                 StatusText = "Processando malha 3D...";
-                
-                InitializeLodController();
-                
                 _ = RegeneratePreviewAsync();
 
                 HeightmapInfo = $"Full: {CurrentHeightmapOriginal.Width}x{CurrentHeightmapOriginal.Height}";
                 StatusText = "Test terrain generated";
-                
-                // Notificar MainWindow para resetar c�mera
-                OnHeightmapChanged?.Invoke();
             }
             catch (Exception ex)
             {
@@ -236,42 +263,9 @@ namespace CityMapStudio.UI.Wpf.ViewModels
             StatusText = "Camera reset";
         }
 
-        public void ExportMapPackage(string destinationFolder)
-        {
-            if (!IsHeightmapLoaded || CurrentHeightmapOriginal == null)
-                throw new InvalidOperationException("Nenhum heightmap carregado");
-
-            StatusText = "Exportando...";
-
-            var heightmapForExport = CurrentHeightmapOriginal.Clone();
-
-            if (ApplySmoothOnExport && SmoothLevel > 0)
-            {
-                var smoothStrength = (SmoothStrength)(int)SmoothLevel;
-                heightmapForExport = _smoothingService.ApplySmooth(heightmapForExport, smoothStrength);
-            }
-
-            if (NormalizeForCS2)
-            {
-                heightmapForExport = _normalizationService.NormalizeForCS2(heightmapForExport, TargetMaxHeight, VerticalScale);
-            }
-
-            var project = new MapProject(
-                "My_Map",
-                heightmapForExport,
-                VerticalScale,
-                SeaLevel
-            );
-
-            var (isValid, errorMessage) = project.Validate();
-            if (!isValid)
-                throw new InvalidOperationException(errorMessage);
-
-            _exportPackage.Execute(project, heightmapForExport, destinationFolder);
-            
-            StatusText = "? Pacote exportado com sucesso!";
-        }
-
+        /// <summary>
+        /// Regenera preview de forma assíncrona com debounce
+        /// </summary>
         private async Task RegeneratePreviewAsync()
         {
             if (CurrentHeightmapOriginal == null || !IsHeightmapLoaded)
@@ -282,14 +276,15 @@ namespace CityMapStudio.UI.Wpf.ViewModels
 
             try
             {
+                // Cancelar job anterior se existir
                 _previewCancellationToken?.Cancel();
                 _previewCancellationToken = new CancellationTokenSource();
-                var token = _previewCancellationToken.Token;
 
                 await Task.Run(async () =>
                 {
-                    token.ThrowIfCancellationRequested();
+                    var token = _previewCancellationToken.Token;
 
+                    // Aplicar smooth + normalização no original
                     var processed = CurrentHeightmapOriginal.Clone();
 
                     if (SmoothLevel > 0)
@@ -305,26 +300,17 @@ namespace CityMapStudio.UI.Wpf.ViewModels
 
                     token.ThrowIfCancellationRequested();
 
-                    Heightmap16Bit preview;
-
-                    if (_previewCache.ContainsKey(SelectedPreviewResolution))
-                    {
-                        preview = _previewCache[SelectedPreviewResolution].Clone();
-                        PreviewInfo = $"Preview: {(int)SelectedPreviewResolution}x{(int)SelectedPreviewResolution} (cached, Full export: 4096x4096)";
-                    }
-                    else
-                    {
-                        preview = _downscaleService.CreatePreview(processed, SelectedPreviewResolution);
-                        _previewCache[SelectedPreviewResolution] = preview.Clone();
-                        PreviewInfo = $"Preview: {(int)SelectedPreviewResolution}x{(int)SelectedPreviewResolution} (Full export: 4096x4096)";
-                    }
+                    // Downscale para preview
+                    var preview = _downscaleService.CreatePreview(processed, SelectedPreviewResolution);
+                    CurrentHeightmap = preview;
 
                     token.ThrowIfCancellationRequested();
 
-                    CurrentHeightmap = preview;
-
-                    await RegenerateMeshWithLodAsync();
+                    // Regenerar mesh
+                    await RegenerateMeshAsync();
                 });
+
+                PreviewInfo = $"Preview: {(int)SelectedPreviewResolution}x{(int)SelectedPreviewResolution} (Full export: 4096x4096)";
             }
             catch (OperationCanceledException)
             {
@@ -336,85 +322,47 @@ namespace CityMapStudio.UI.Wpf.ViewModels
             }
         }
 
+        /// <summary>
+        /// Agenda regeneração de preview com debounce
+        /// </summary>
         private void SchedulePreviewUpdate()
         {
             _previewDebounceTimer.Stop();
             _previewDebounceTimer.Start();
         }
 
-        public void ScheduleLodUpdate()
-        {
-            _lodDebounceTimer.Stop();
-            _lodDebounceTimer.Start();
-        }
-
-        private void ApplyLodChange()
-        {
-            if (_lodController == null || CurrentHeightmap == null)
-                return;
-
-            int desiredStep = _lodController.CurrentStep;
-
-            if (desiredStep == _currentLodStep)
-                return;
-
-            _currentLodStep = desiredStep;
-            LodIndicator = $"LOD: {_lodController.CurrentLodIndex} (step={_currentLodStep})";
-
-            _ = RegenerateMeshWithLodAsync();
-        }
-
-        private async Task RegenerateMeshWithLodAsync()
+        /// <summary>
+        /// Regenera malha 3D com reamostragem baseada em RenderResolution
+        /// Simples, sem cache, sem overhead
+        /// </summary>
+        public async Task RegenerateMeshAsync()
         {
             if (CurrentHeightmap == null || !IsHeightmapLoaded)
                 return;
 
-            await Task.Run(() =>
+            IsLoading = true;
+
+            try
             {
-                var cacheKey = (_currentLodStep, SeaLevel, VerticalScale);
-
-                if (_meshCache.ContainsKey(cacheKey))
+                await Task.Run(() =>
                 {
-                    var cachedData = _meshCache[cacheKey];
-                    TerrainMesh = cachedData.TerrainMesh;
-                    WaterMesh = cachedData.WaterMesh;
-                    return;
-                }
+                    // Downsample para resolução de renderização
+                    int targetSize = (int)RenderResolution;
+                    var renderHeightmap = CurrentHeightmap.Downsample(targetSize, targetSize);
 
-                var meshData = _meshGenerator.GenerateTerrainMeshWithSeaLevel(
-                    CurrentHeightmap, VerticalScale, SeaLevel, 1.0f, _currentLodStep);
+                    // Gerar malha com a versão redimensionada
+                    var meshData = _meshGenerator.GenerateTerrainMeshWithSeaLevel(
+                        renderHeightmap, VerticalScale, SeaLevel, 1.0f);
 
-                _meshCache[cacheKey] = meshData;
-
-                TerrainMesh = meshData.TerrainMesh;
-                WaterMesh = meshData.WaterMesh;
-            });
-        }
-
-        public void InitializeLodController()
-        {
-            if (CurrentHeightmapOriginal == null)
-                return;
-
-            float terrainSize = CurrentHeightmapOriginal.Width;
-            float center = terrainSize / 2f;
-
-            var profile = new LODProfile();
-            _lodController = new TerrainLodController(profile, center, center, terrainSize);
-            _currentLodStep = 1;
-            _meshCache.Clear();
-
-            LodIndicator = "LOD: 0 (step=1)";
-        }
-
-        /// <summary>
-        /// Reseta a c�mera para orienta��o correta (vista de cima, horizontal)
-        /// Chamado ap�s criar/importar/resetar mapa
-        /// </summary>
-        public void ResetCameraView()
-        {
-            // Will be called from MainWindow with HelixViewport3D reference
-            // See MainWindow.xaml.cs for implementation
+                    // Atualizar no thread principal
+                    TerrainMesh = meshData.TerrainMesh;
+                    WaterMesh = meshData.WaterMesh;
+                });
+            }
+            finally
+            {
+                IsLoading = false;
+            }
         }
 
         partial void OnVerticalScaleChanged(float oldValue, float newValue)
@@ -426,7 +374,7 @@ namespace CityMapStudio.UI.Wpf.ViewModels
                 SeaLevelMax = maxHeight;
                 SeaLevel = TerrainSettings.ClampSeaLevel(SeaLevel, CurrentHeightmap, newValue);
 
-                _ = RegenerateMeshWithLodAsync();
+                _ = RegenerateMeshAsync();
             }
         }
 
@@ -436,7 +384,15 @@ namespace CityMapStudio.UI.Wpf.ViewModels
 
             if (CurrentHeightmap != null && IsHeightmapLoaded)
             {
-                _ = RegenerateMeshWithLodAsync();
+                _ = RegenerateMeshAsync();
+            }
+        }
+
+        partial void OnRenderResolutionChanged(float oldValue, float newValue)
+        {
+            if (CurrentHeightmap != null && IsHeightmapLoaded)
+            {
+                _ = RegenerateMeshAsync();
             }
         }
 
@@ -473,7 +429,7 @@ namespace CityMapStudio.UI.Wpf.ViewModels
         }
     }
 
-    public class RelayCommand : System.Windows.Input.ICommand
+    public class RelayCommand : ICommand
     {
         private readonly Action _execute;
 
@@ -486,6 +442,6 @@ namespace CityMapStudio.UI.Wpf.ViewModels
 
         public bool CanExecute(object parameter) => true;
 
-        public void Execute(object parameter) => _execute?.Invoke();
+        public void Execute(object parameter) => _execute();
     }
 }
