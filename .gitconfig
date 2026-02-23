@@ -1,0 +1,45 @@
+# Configuração de Git para CityMapStudio
+
+[core]
+    autocrlf = true
+    safecrlf = false
+
+[user]
+    name = CityMapStudio Developer
+    email = dev@citymapstudio.local
+
+[push]
+    default = current
+    autoSetupRemote = true
+
+[pull]
+    rebase = false
+
+[fetch]
+    prune = true
+
+[merge]
+    conflictStyle = zdiff3
+
+[status]
+    showUntrackedFiles = all
+
+[diff]
+    tool = vscode
+    algorithm = histogram
+
+[difftool "vscode"]
+    cmd = code --wait --diff $LOCAL $REMOTE
+
+[alias]
+    st = status
+    co = checkout
+    br = branch
+    ci = commit
+    unstage = reset HEAD --
+    last = log -1 HEAD
+    visual = log --graph --oneline --all
+    contrib = shortlog --summary --numbered
+    amend = commit --amend --no-edit
+    push-all = push --all --follow-tags
+    sync = fetch origin master && git merge origin/master

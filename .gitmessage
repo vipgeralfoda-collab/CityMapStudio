@@ -1,0 +1,39 @@
+# <type>(<scope>): <subject>
+# 
+# <body>
+#
+# <footer>
+#
+# Types:
+#   feat:     A new feature
+#   fix:      A bug fix
+#   refactor: Code refactoring
+#   perf:     Performance improvement
+#   docs:     Documentation
+#   test:     Test additions or changes
+#   style:    Code style changes (semicolons, commas, etc)
+#   chore:    Dependencies and configuration
+#
+# Scopes for CityMapStudio:
+#   - ui:         WPF UI components
+#   - viewport:   3D viewport and rendering
+#   - camera:     Camera controller
+#   - mesh:       Terrain/Water mesh generation
+#   - water:      Water-related features
+#   - terrainMesh: Terrain mesh generation
+#   - lod:        Level of Detail system
+#   - material:   Material and shading
+#   - export:     Export functionality
+#   - import:     Import functionality
+#   - domain:     Domain models
+#   - app:        Application logic
+#   - infra:      Infrastructure/IO
+#   - perf:       Performance optimization
+#   - tests:      Unit/Integration tests
+#   - ci:         CI/CD configuration
+#   - docs:       Documentation
+#
+# Example:
+#   feat(water): add water transparency to rendering
+#   fix(camera): correct Z-axis positioning for frontal view
+#   perf(mesh): optimize normal calculation in TerrainMeshGenerator
